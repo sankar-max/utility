@@ -1,0 +1,232 @@
+import * as React from "react"
+import { cn } from "./cn"
+import { ChevronDown } from "lucide-react"
+import { useGetTheme } from "../ui/GetTheme"
+import { useEffect, useRef } from "react"
+import useClickOutside from "../hooks/useClickOutside"
+import { createPortal } from "react-dom"
+
+interface SelectProps {
+  children: React.ReactNode
+  className?: string
+  multiple?: boolean
+}
+
+interface SelectContextType {
+  isOpen: boolean
+  setIsOpen: (open: boolean) => void
+  selectedValues: string[]
+  setSelectedValues: (values: string[]) => void
+  multiple: boolean
+  triggerRef: React.RefObject<HTMLButtonElement>
+  contentRef: React.RefObject<HTMLDivElement>
+  dropdownPosition: {
+    top: number
+    left: number
+    width: number
+    isAbove: boolean
+  }
+}
+
+interface SelectValueProps {
+  placeholder?: string
+  className?: string
+}
+
+interface SelectItemProps extends SelectProps {
+  value: string
+}
+
+const SelectContext = React.createContext<SelectContextType | undefined>(
+  undefined
+)
+
+const useSelectContext = () => {
+  const context = React.useContext(SelectContext)
+  if (!context) {
+    throw new Error("Select components must be used within Select provider")
+  }
+  return context
+}
+
+const Select = ({ children, className, multiple = false }: SelectProps) => {
+  const [isOpen, setIsOpen] = React.useState(false)
+  const [selectedValues, setSelectedValues] = React.useState<string[]>([])
+  const [dropdownPosition, setDropdownPosition] = React.useState<{
+    top: number
+    left: number
+    width: number
+    isAbove: boolean
+  }>({ top: 0, left: 0, width: 0, isAbove: false })
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const handleOutsideScroll = (event: Event) => {
+    if (isOpen) {
+      const target = event.target as HTMLElement
+
+      if (
+        contentRef.current &&
+        !contentRef.current.contains(target) &&
+        triggerRef.current &&
+        !triggerRef.current.contains(target)
+      ) {
+        setIsOpen(false)
+      }
+    }
+  }
+  const calculateDropdownPosition = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      const dropdownHeight = contentRef.current?.offsetHeight || 200
+
+      const spaceBelow = window.innerHeight - rect.bottom
+      const spaceAbove = rect.top
+
+      const isAbove = spaceBelow < dropdownHeight && spaceAbove > dropdownHeight
+
+      setDropdownPosition({
+        top: isAbove
+          ? rect.top - dropdownHeight + window.scrollY
+          : rect.bottom + window.scrollY,
+        left: rect.left + window.scrollX,
+        width: rect.width,
+        isAbove,
+      })
+    }
+  }
+  useEffect(() => {
+    if (isOpen) {
+      calculateDropdownPosition()
+      window.addEventListener("scroll", handleOutsideScroll, true)
+
+      return () => {
+        window.removeEventListener("scroll", handleOutsideScroll, true)
+      }
+    }
+  }, [isOpen])
+  return (
+    <SelectContext.Provider
+      value={{
+        isOpen,
+        setIsOpen,
+        selectedValues,
+        setSelectedValues,
+        multiple,
+        triggerRef,
+        contentRef,
+        dropdownPosition,
+      }}
+    >
+      <div className={cn("relative w-full", className)}>{children}</div>
+    </SelectContext.Provider>
+  )
+}
+
+const SelectValue = ({ placeholder, className }: SelectValueProps) => {
+  const { selectedValues } = useSelectContext()
+
+  return (
+    <span className={cn("block truncate", className)}>
+      {selectedValues.join(", ") || placeholder}
+    </span>
+  )
+}
+
+const SelectTrigger = ({ children, className }: SelectProps) => {
+  const { isOpen, setIsOpen, triggerRef } = useSelectContext()
+
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      onClick={() => setIsOpen(!isOpen)}
+      className={cn(
+        "flex h-9 w-full items-center justify-between rounded-md border bg-transparent px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      )}
+    >
+      {children}
+      <ChevronDown className="h-4 w-4 opacity-50" />
+    </button>
+  )
+}
+
+const SelectItem = ({ children, className, value }: SelectItemProps) => {
+  const { selectedValues, setSelectedValues, setIsOpen, multiple } =
+    useSelectContext()
+  const { primary } = useGetTheme()
+
+  const isSelected = selectedValues.includes(value)
+
+  const handleClick = () => {
+    if (multiple) {
+      if (isSelected) {
+        setSelectedValues(selectedValues.filter((item) => item !== value))
+      } else {
+        setSelectedValues([...selectedValues, value])
+      }
+    } else {
+      setSelectedValues([value])
+      setIsOpen(false)
+    }
+  }
+
+  return (
+    <button
+      style={
+        {
+          "--primary": primary,
+        } as React.CSSProperties
+      }
+      type="button"
+      className={cn(
+        "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none",
+        isSelected && "bg-[var(--primary)] text-white",
+        className
+      )}
+      onClick={handleClick}
+    >
+      {children}
+    </button>
+  )
+}
+
+const SelectGroup = ({ children, className }: SelectProps) => {
+  return <div className={cn("space-y-1", className)}>{children}</div>
+}
+
+const SelectContent = ({ children, className }: SelectProps) => {
+  const { isOpen, contentRef, setIsOpen, dropdownPosition } = useSelectContext()
+
+  useClickOutside(contentRef, () => setIsOpen(false))
+
+  if (!isOpen) return null
+
+  return createPortal(
+    <div
+      ref={contentRef}
+      className={cn(
+        "absolute z-50 min-w-[8rem] bg-white overflow-hidden rounded-md border shadow-md mt-1 w-full",
+        dropdownPosition.isAbove ? "mb-2" : "mt-0.5",
+        className
+      )}
+      style={{
+        top: dropdownPosition.top,
+        left: dropdownPosition.left,
+        width: dropdownPosition.width,
+      }}
+    >
+      <div className="p-1">{children}</div>
+    </div>,
+    document.body
+  )
+}
+
+export {
+  Select,
+  SelectValue,
+  SelectTrigger,
+  SelectItem,
+  SelectGroup,
+  SelectContent,
+}
